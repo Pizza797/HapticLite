@@ -17,18 +17,35 @@
 ---
 
 ## Table of Contents
+- [How it works](#how_it_works)
 - [Features](#features)
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
 - [License](#license)
 
+## How it works
+
+Logitech's Logi Options+ app loads a plugin called HapticWeb, which lets other programs trigger the mouse's haptic waveforms over a local web address. 
+
+HapticLite watches your mouse buttons and the active app and asks HapticWeb to play the waveform you chose. 
+
+*Note: HapticLite does not communicate with the mouse directly and does not replace the Options+ app.*
+
 ## Features
-- Runs locally
+- Runs locally (Has a browser settings page)
 - Haptic waveforms for left, right and middle clicks
 - Optional feedback for scrolling with adjustable spacing
 - Hold feedback: replays a waveform while a button is held and stops on release
 - Per-app profiles, plus a default profile for all other apps/windows
 - Per-app windows pointer speed setting
+
+## Requirements
+- Windows machine
+- Logitech MX Master 4 mouse
+- Logi Options+ app (tested on version 1.83)
+- The HapticWeb plugin (https://haptics.jmw.nz/), this will need to be installed in Options+ as a plugin
+- Python 3.12 (or higher)
 
 ## Installation
 
