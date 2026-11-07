@@ -57,7 +57,7 @@ HapticLite watches your mouse buttons and the active app and asks HapticWeb to p
   - Click "Show actions ring" > 
   - Click "Configure action ring" > 
   - Click on the Marketplace icon (Top right corner) and search for HapticWeb by Jasper M-W
-  <img src="assets/HapticWeb Plugin.png"
+    <img src="assets/HapticWeb Plugin.png"
 
 ```bash
 git clone https://github.com/USERNAME/REPO.git
