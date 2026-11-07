@@ -41,7 +41,7 @@ HapticLite watches your mouse buttons and the active app and asks HapticWeb to p
 - Per-app windows pointer speed setting
 
 ## Requirements
-- Windows machine
+- Windows machine (Windows 10/11)
 - Logitech MX Master 4 mouse
 - Logi Options+ app (tested on version 1.83)
 - The HapticWeb plugin (https://haptics.jmw.nz/), this will need to be installed in Options+ as a plugin
