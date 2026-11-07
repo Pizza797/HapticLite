@@ -1,19 +1,16 @@
-# HapticLite
-Open-source Haptic feedback control for the Logitech MX Master 4 
-
 <p align="center">
   <img src="assets/logo.png" alt="Project logo" width="200">
 </p>
 
-<h1 align="center">Project Name</h1>
+<h1 align="center">HapticLite</h1>
 
 <p align="center">
-  One-line description of what the project does.
+  Open-source Haptic feedback control for the Logitech MX Master 4.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/license/USERNAME/REPO" alt="License">
-  <img src="https://img.shields.io/github/last-commit/USERNAME/REPO" alt="Last commit">
+  <<img src="https://img.shields.io/github/license/Pizza797/HapticLite" alt="License">
+  <img src="https://img.shields.io/github/last-commit/Pizza797/HapticLite" alt="Last commit">
   <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python">
 </p>
 
