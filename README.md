@@ -49,6 +49,16 @@ HapticLite watches your mouse buttons and the active app and asks HapticWeb to p
 
 ## Installation
 
+*Note: I recommend installing HapticLite in a normal PowerShell window and not as admin. If installed as an admin it will show a UAC prompt after each startup* 
+
+1. Make sure you have Options+ installed [Download Options+](https://www.logitech.com/en-us/software/logi-options-plus)
+2. Install the HapticWeb plugin in Options+ 
+  - Options+ > Buttons 
+  - Click "Show actions ring" > 
+  - Click "Configure action ring" > 
+  - Click on the Marketplace icon (Top right corner) and search for HapticWeb by Jasper M-W
+  <img src="assets/HapticWeb Plugin.png"
+
 ```bash
 git clone https://github.com/USERNAME/REPO.git
 cd REPO
