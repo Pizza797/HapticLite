@@ -56,14 +56,24 @@ HapticLite watches your mouse buttons and the active app and asks HapticWeb to p
   - Options+ > Buttons 
   - Click "Show actions ring" > 
   - Click "Configure action ring" > 
-  - Click on the Marketplace icon (Top right corner) and search for HapticWeb by Jasper M-W
-    <img src="assets/HapticWeb Plugin.png">
+  - Click on the Marketplace icon (Top right corner) and search for HapticWeb by **Jasper M-W**
+<img src="assets/HapticWeb Plugin.png">
 
-```bash
-git clone https://github.com/USERNAME/REPO.git
-cd REPO
-pip install -r requirements.txt
+3. Test that the plugin is working by going to [HapticWeb Playground](https://haptics.jmw.nz/playground). It should say that the plugin is connected and you should be able to change some of your waveform settings in the Playground. 
+
+*You can also test by running this command in Powershell:*
+```bash 
+Invoke-RestMethod https://local.jmw.nz:41443/waveforms
 ```
+
+4. Install Python 3.12 if not it's not installed yet [Download Python](https://www.python.org/downloads/)
+  If you are unsure what version you have or if it's installed, run this command in PowerShell and it should show the installed version:*
+  ```bash
+  python --version
+  ```
+
+5. Download the [HapticLite repo](https://github.com/Pizza797/HapticLite) and open a PowerShell window in the folder (Right-click and select "open terminal here") 
+<img src="assets/Terminal .png">
 
 ## Usage
 
