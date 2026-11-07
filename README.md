@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <<img src="https://img.shields.io/github/license/Pizza797/HapticLite" alt="License">
+  <img src="https://img.shields.io/github/license/Pizza797/HapticLite" alt="License">
   <img src="https://img.shields.io/github/last-commit/Pizza797/HapticLite" alt="Last commit">
   <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python">
 </p>
