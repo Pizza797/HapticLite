@@ -45,7 +45,7 @@ function Find-Python {
 if ($Uninstall) {
     Stop-App
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    Remove-Item $lnk, "$desktop\Restart HapticLite.bat", "$desktop\HapticLite Settings.url" -ErrorAction SilentlyContinue
+    Remove-Item $lnk, "$desktop\HapticLite_Restart.bat", "$desktop\HapticLite Settings.url" -ErrorAction SilentlyContinue
     Write-Host "Stopped the app and removed the task, startup shortcut and desktop files. Your files are kept in $dir"
     exit 0
 }
@@ -524,7 +524,7 @@ taskkill /F /IM pythonw.exe >nul 2>&1
 start "" /D "%USERPROFILE%\HapticLite" "%LOCALAPPDATA%\Programs\Python\Python312\pythonw.exe" "%USERPROFILE%\HapticLite\app.py"
 '@
 }
-Set-Content -Encoding ascii "$desktop\Restart HapticLite.bat" $bat
+Set-Content -Encoding ascii "$desktop\HapticLite_Restart.bat" $bat
 @("[InternetShortcut]", "URL=http://localhost:8767") | Set-Content -Encoding ascii "$desktop\HapticLite Settings.url"
 
 # ---- 7. start and check ----
@@ -550,5 +550,5 @@ try {
 Write-Host ""
 Write-Host "Done. Still to do by hand:"
 Write-Host "  1. Logi Options+ > Buttons > Show actions ring > Configure action ring > Marketplace icon (top right) > search 'HapticWeb' by Jasper M-W > install, then restart Options+."
-Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file on your Desktop)."
-Write-Host "Restart the app any time with 'Restart HapticLite.bat' on your Desktop."
+Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file in the HapticLite application folder)."
+Write-Host "Restart the app any time with 'HapticLite_Restart.bat' in the HapticLite application folder."
