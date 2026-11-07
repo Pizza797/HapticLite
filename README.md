@@ -23,9 +23,12 @@
 - [License](#license)
 
 ## Features
-- Feature one
-- Feature two
-- Feature three
+- Runs locally
+- Haptic waveforms for left, right and middle clicks
+- Optional feedback for scrolling with adjustable spacing
+- Hold feedback: replays a waveform while a button is held and stops on release
+- Per-app profiles, plus a default profile for all other apps/windows
+- Per-app windows pointer speed setting
 
 ## Installation
 
@@ -43,10 +46,10 @@ import mypackage
 mypackage.run()
 ```
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--port` | Port to listen on | `8080` |
-| `--debug` | Enable debug logging | `false` |
+// | Option | Description | Default |
+// |--------|-------------|---------|
+// | `--port` | Port to listen on | `8080` |
+// | `--debug` | Enable debug logging | `false` |
 
 ## Screenshots
 ![Screenshot](assets/screenshot.png)
