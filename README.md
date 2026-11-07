@@ -66,27 +66,12 @@ HapticLite watches your mouse buttons and the active app and asks HapticWeb to p
 Invoke-RestMethod https://local.jmw.nz:41443/waveforms
 ```
 
-4. Install Python 3.12 if not it's not installed yet [Download Python](https://www.python.org/downloads/)
-  If you are unsure what version you have or if it's installed, run this command in PowerShell and it should show the installed version:*
-  ```bash
-  python --version
-  ```
-
-5. Download the [HapticLite repo](https://github.com/Pizza797/HapticLite) and open a PowerShell window in the folder (Right-click and select "open terminal here") 
+4. Download the [HapticLite repo](https://github.com/Pizza797/HapticLite) and open a PowerShell window in the folder (Right-click and select "open terminal here") 
 <img src="assets/Terminal .png">
+
 
 ## Usage
 
-```python
-import mypackage
-
-mypackage.run()
-```
-
-// | Option | Description | Default |
-// |--------|-------------|---------|
-// | `--port` | Port to listen on | `8080` |
-// | `--debug` | Enable debug logging | `false` |
 
 ## Screenshots
 ![Screenshot](assets/screenshot.png)
