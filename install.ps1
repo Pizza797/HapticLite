@@ -45,7 +45,7 @@ function Find-Python {
 if ($Uninstall) {
     Stop-App
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    Remove-Item $lnk, "$desktop\HapticLite_Restart.bat", "$desktop\HapticLite Settings.url" -ErrorAction SilentlyContinue
+    Remove-Item $lnk, "$desktop\restart.bat", "$desktop\HapticLite Settings.url" -ErrorAction SilentlyContinue
     Write-Host "Stopped the app and removed the task, startup shortcut and desktop files. Your files are kept in $dir"
     exit 0
 }
@@ -74,13 +74,18 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 if (Test-Path "$dir\app.py") { Copy-Item "$dir\app.py" "$dir\app.py.bak" -Force }
 
 $app = @'
-import json, os, time, ctypes, threading, requests, winreg
+import json, os, time, ctypes, threading, queue, requests, winreg
 from ctypes import wintypes
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from pynput import mouse
+try:
+    import websocket
+except Exception:
+    websocket = None
 
 BASE = "https://local.jmw.nz:41443"
+WS_URL = "wss://local.jmw.nz:41443/ws"
 CFG = Path(__file__).with_name("settings.json")
 FALLBACK = ["sharp_collision", "sharp_state_change", "knock", "damp_collision"]
 DEFAULT_PROFILE = {
@@ -89,12 +94,12 @@ DEFAULT_PROFILE = {
     "x1": "sharp_collision", "x2": "sharp_collision",
     "hold_on": False, "hold_ms": 0, "hold_wf": "sharp_collision",
     "pulse": False, "pulse_ms": 200, "pulse_wf": "knock",
-    "scroll_on": False, "scroll_wf": "damp_collision", "scroll_ms": 120,
-    "thumb_on": False, "thumb_wf": "damp_collision", "thumb_ms": 120,
+    "scroll_on": False, "scroll_wf": "damp_collision", "scroll_density": 2,
+    "thumb_on": False, "thumb_wf": "damp_collision", "thumb_density": 2,
     "ptr_on": False, "ptr_speed": 10,
 }
 LIMITS = {"delay": (0, 500), "hold_ms": (0, 2000), "pulse_ms": (30, 1000),
-          "strength": (1, 3), "scroll_ms": (50, 500), "thumb_ms": (50, 500), "ptr_speed": (1, 20)}
+          "strength": (1, 3), "scroll_density": (0, 4), "thumb_density": (0, 4), "ptr_speed": (1, 20)}
 BUTTONS = ("left", "right", "middle", "x1", "x2")
 
 def load():
@@ -147,14 +152,19 @@ def fg_exe():
 
 # ---- plugin connection ----
 S = requests.Session()
-state = {"wf": FALLBACK, "online": False, "active": "", "seen": set()}
+state = {"wf": FALLBACK, "online": False, "active": "", "seen": set(), "idx": {}}
 
 def warm():
     while True:
         try:
             d = S.get(f"{BASE}/waveforms", timeout=3).json()
             d = d.get("waveforms", d) if isinstance(d, dict) else d
-            state["wf"] = [w["name"] if isinstance(w, dict) else w for w in d]
+            names = [w["name"] if isinstance(w, dict) else w for w in d]
+            state["wf"] = names
+            if names[:4] == ["sharp_collision", "sharp_state_change", "knock", "damp_collision"]:
+                state["idx"] = {n: i for i, n in enumerate(names)}
+            else:
+                state["idx"] = {}
             state["online"] = True
             time.sleep(15)
         except Exception:
@@ -198,6 +208,34 @@ def watch():
 threading.Thread(target=warm, daemon=True).start()
 threading.Thread(target=watch, daemon=True).start()
 
+ws_conn = [None]
+ws_lock = threading.Lock()
+ws_down_until = [0.0]
+
+def send_wf(name):
+    # Fast path: persistent WebSocket (one byte = waveform index). Falls back to REST.
+    i = state["idx"].get(name)
+    if websocket is not None and i is not None and time.monotonic() >= ws_down_until[0]:
+        with ws_lock:
+            for _ in range(2):
+                try:
+                    if ws_conn[0] is None:
+                        ws_conn[0] = websocket.create_connection(WS_URL, timeout=2)
+                    ws_conn[0].send_binary(bytes([i]))
+                    return
+                except Exception:
+                    try:
+                        if ws_conn[0] is not None:
+                            ws_conn[0].close()
+                    except Exception:
+                        pass
+                    ws_conn[0] = None
+            ws_down_until[0] = time.monotonic() + 30
+    try:
+        S.post(f"{BASE}/haptic/{name}", data="", timeout=2)
+    except Exception:
+        pass
+
 def buzz(name, delay=0, reps=1):
     try:
         if delay:
@@ -205,14 +243,12 @@ def buzz(name, delay=0, reps=1):
         for i in range(max(1, reps)):
             if i:
                 time.sleep(0.04)
-            S.post(f"{BASE}/haptic/{name}", data="", timeout=2)
+            send_wf(name)
     except Exception:
         pass
 
 # ---- mouse handling ----
 holds = {}
-last_scroll = [0.0]
-last_thumb = [0.0]
 
 def hold_worker(ev, p):
     gap = max(0.03, p["pulse_ms"] / 1000)
@@ -240,25 +276,69 @@ def on_click(x, y, button, pressed):
         if ev:
             ev.set()
 
-def on_scroll(x, y, dx, dy):
+# ---- scroll wheels: one pulse per notch, with density ----
+# Raw wheel units: 120 = one notch. Density picks how many units per pulse.
+STEPS = [360, 240, 120, 60, 30]   # Sparse, Light, Standard, Fine, Dense
+acc = {"v": 0, "h": 0}
+dirs = {"v": 0, "h": 0}
+last_ev = {"v": 0.0, "h": 0.0}
+last_pulse = {"v": 0.0, "h": 0.0}
+pulse_q = queue.Queue()
+
+def pulse_worker():
+    while True:
+        name = pulse_q.get()
+        while pulse_q.qsize() > 2:   # drop stale backlog so feedback never lags the wheel
+            try:
+                pulse_q.get_nowait()
+            except Exception:
+                break
+        send_wf(name)
+
+threading.Thread(target=pulse_worker, daemon=True).start()
+
+def wheel(kind, delta):
+    # kind "v" = main wheel, "h" = side (thumb) wheel. delta is the raw signed wheel value.
+    if delta == 0:
+        return
     p = cfg["apps"].get(state["active"], cfg["default"])
     if not p["enabled"]:
         return
-    now = time.monotonic()
-    if dx != 0:
-        # side (thumb) wheel sends horizontal scroll
-        if not p["thumb_on"] or now - last_thumb[0] < p["thumb_ms"] / 1000:
-            return
-        last_thumb[0] = now
-        wf = p["thumb_wf"]
+    if kind == "v":
+        on, wf, dens = p["scroll_on"], p["scroll_wf"], p["scroll_density"]
     else:
-        if not p["scroll_on"] or now - last_scroll[0] < p["scroll_ms"] / 1000:
-            return
-        last_scroll[0] = now
-        wf = p["scroll_wf"]
-    threading.Thread(target=buzz, args=(wf, 0, p["strength"]), daemon=True).start()
+        on, wf, dens = p["thumb_on"], p["thumb_wf"], p["thumb_density"]
+    if not on:
+        return
+    now = time.monotonic()
+    step = STEPS[max(0, min(4, int(dens)))]
+    sg = 1 if delta > 0 else -1
+    a = acc[kind]
+    if now - last_ev[kind] > 0.4 or dirs[kind] != sg:
+        a = (step - 120) * sg if step > 120 else 0   # new gesture or reversal: first notch pulses at once
+    dirs[kind] = sg
+    last_ev[kind] = now
+    a += delta
+    if abs(a) >= step:
+        r = abs(a) % step
+        a = r if a > 0 else -r
+        if now - last_pulse[kind] >= 0.025:
+            last_pulse[kind] = now
+            pulse_q.put(wf)
+    acc[kind] = a
 
-mouse.Listener(on_click=on_click, on_scroll=on_scroll).start()
+def win_filter(msg, data):
+    # Read the raw wheel value ourselves. pynput's own on_scroll rounds it to whole notches,
+    # which breaks smooth wheels (and rounds the two directions differently).
+    if msg == 0x020A or msg == 0x020E:
+        try:
+            wheel("v" if msg == 0x020A else "h", wintypes.SHORT(data.mouseData >> 16).value)
+        except Exception:
+            pass
+        return False
+    return True
+
+mouse.Listener(on_click=on_click, win32_event_filter=win_filter).start()
 
 # ---- web UI ----
 app = Flask(__name__)
@@ -288,7 +368,7 @@ button.sec{background:#2d3158}
 button.danger{background:#7a2b3a}
 button:active{transform:scale(.96)}
 input[type=range]{flex:1;accent-color:#7c4dff}
-.val{width:64px;text-align:right;font-variant-numeric:tabular-nums;font-size:14px}
+.val{width:72px;text-align:right;font-variant-numeric:tabular-nums;font-size:14px}
 .sw{position:relative;width:46px;height:26px}
 .sw input{display:none}
 .sw span{position:absolute;inset:0;background:#444a73;border-radius:26px;cursor:pointer;transition:.2s}
@@ -329,13 +409,13 @@ hr{border:0;border-top:1px solid rgba(255,255,255,.1);margin:18px 0}
 <h3>Scroll wheel</h3>
 <div class="row"><label>Scroll buzz</label><label class="sw"><input type="checkbox" id="scroll_on"><span></span></label></div>
 <div class="row"><label>Scroll waveform</label><select id="scroll_wf"></select><button onclick="t('scroll_wf')">Test</button></div>
-<div class="row"><label>Scroll spacing</label><input type="range" id="scroll_ms" min="50" max="500" step="10"><span class="val" id="scv"></span></div>
+<div class="row"><label>Density</label><input type="range" id="scroll_density" min="0" max="4" step="1"><span class="val" id="scv"></span></div>
 <hr>
 
 <h3>Side scroll wheel (thumb)</h3>
 <div class="row"><label>Thumb buzz</label><label class="sw"><input type="checkbox" id="thumb_on"><span></span></label></div>
 <div class="row"><label>Thumb waveform</label><select id="thumb_wf"></select><button onclick="t('thumb_wf')">Test</button></div>
-<div class="row"><label>Thumb spacing</label><input type="range" id="thumb_ms" min="50" max="500" step="10"><span class="val" id="thv"></span></div>
+<div class="row"><label>Density</label><input type="range" id="thumb_density" min="0" max="4" step="1"><span class="val" id="thv"></span></div>
 <hr>
 
 <h3>Pointer speed</h3>
@@ -355,7 +435,7 @@ hr{border:0;border-top:1px solid rgba(255,255,255,.1);margin:18px 0}
 <script>
 const $=id=>document.getElementById(id);
 const WF=["left","right","middle","x1","x2","scroll_wf","thumb_wf","hold_wf","pulse_wf"];
-const SL=["delay","hold_ms","pulse_ms","strength","scroll_ms","thumb_ms","ptr_speed"];
+const SL=["delay","hold_ms","pulse_ms","strength","scroll_density","thumb_density","ptr_speed"];
 const CB=["enabled","pulse","scroll_on","thumb_on","hold_on","ptr_on"];
 let S=null, cur="default";
 
@@ -370,8 +450,9 @@ function labels(){
   $("hv").textContent=+$("hold_ms").value===0?"Instant":$("hold_ms").value+" ms";
   $("pv").textContent=$("pulse_ms").value+" ms";
   $("sv").textContent=$("strength").value+"x";
-  $("scv").textContent=$("scroll_ms").value+" ms";
-  $("thv").textContent=$("thumb_ms").value+" ms";
+  const DN=["Sparse","Light","Standard","Fine","Dense"];
+  $("scv").textContent=DN[$("scroll_density").value];
+  $("thv").textContent=DN[$("thumb_density").value];
   $("ptv").textContent=$("ptr_speed").value;
 }
 function fillProfiles(){
@@ -481,8 +562,8 @@ app.run(host="127.0.0.1", port=8767)
 Set-Content -Encoding utf8 "$dir\app.py" $app
 
 # ---- 4. libraries ----
-Write-Host "[4/7] Installing libraries (flask, requests, pynput)..."
-& $py -m pip install --quiet --disable-pip-version-check flask requests pynput
+Write-Host "[4/7] Installing libraries (flask, requests, pynput, websocket-client)..."
+& $py -m pip install --quiet --disable-pip-version-check flask requests pynput websocket-client
 if ($LASTEXITCODE -ne 0) { throw "pip install failed. Check your internet connection and run this script again." }
 
 # ---- 5. autostart (Task Scheduler, with Startup-shortcut fallback) ----
@@ -524,7 +605,7 @@ taskkill /F /IM pythonw.exe >nul 2>&1
 start "" /D "%USERPROFILE%\HapticLite" "%LOCALAPPDATA%\Programs\Python\Python312\pythonw.exe" "%USERPROFILE%\HapticLite\app.py"
 '@
 }
-Set-Content -Encoding ascii "$desktop\HapticLite_Restart.bat" $bat
+Set-Content -Encoding ascii "$desktop\restart.bat" $bat
 @("[InternetShortcut]", "URL=http://localhost:8767") | Set-Content -Encoding ascii "$desktop\HapticLite Settings.url"
 
 # ---- 7. start and check ----
@@ -550,5 +631,5 @@ try {
 Write-Host ""
 Write-Host "Done. Still to do by hand:"
 Write-Host "  1. Logi Options+ > Buttons > Show actions ring > Configure action ring > Marketplace icon (top right) > search 'HapticWeb' by Jasper M-W > install, then restart Options+."
-Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file in the HapticLite application folder)."
-Write-Host "Restart the app any time with 'HapticLite_Restart.bat' in the HapticLite application folder."
+Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file in the app folder)."
+Write-Host "Restart the app any time with 'restart.bat' in the application folder."
