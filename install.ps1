@@ -94,8 +94,8 @@ DEFAULT_PROFILE = {
     "x1": "sharp_collision", "x2": "sharp_collision",
     "hold_on": False, "hold_ms": 0, "hold_wf": "sharp_collision",
     "pulse": False, "pulse_ms": 200, "pulse_wf": "knock",
-    "scroll_on": False, "scroll_wf": "damp_collision", "scroll_density": 2,
-    "thumb_on": False, "thumb_wf": "damp_collision", "thumb_density": 2,
+    "scroll_on": False, "scroll_wf": "damp_collision", "scroll_density": 2, "scroll_hid": False,
+    "thumb_on": False, "thumb_wf": "damp_collision", "thumb_density": 2, "thumb_hid": False,
     "ptr_on": False, "ptr_speed": 10,
 }
 LIMITS = {"delay": (0, 500), "hold_ms": (0, 2000), "pulse_ms": (30, 1000),
@@ -279,6 +279,14 @@ def on_click(x, y, button, pressed):
 # ---- scroll wheels: one pulse per notch, with density ----
 # Raw wheel units: 120 = one notch. Density picks how many units per pulse.
 STEPS = [360, 240, 120, 60, 30]   # Sparse, Light, Standard, Fine, Dense
+# Wheels read straight from the mouse (USB receiver), for apps where Windows gets no wheel events.
+# Measured on an MX Master 4: device slot 0x01; side wheel = feature 0x13 (about 4.16 units per notch),
+# main wheel = feature 0x12 (1 unit per ratchet notch).
+THUMB_DEV = 0x01
+THUMB_FEAT = 0x13
+HID_UNITS_PER_NOTCH = 4.16
+MAIN_FEAT = 0x12
+MAIN_UNITS_PER_NOTCH = 1.0
 acc = {"v": 0, "h": 0}
 dirs = {"v": 0, "h": 0}
 last_ev = {"v": 0.0, "h": 0.0}
@@ -297,13 +305,16 @@ def pulse_worker():
 
 threading.Thread(target=pulse_worker, daemon=True).start()
 
-def wheel(kind, delta):
+def wheel(kind, delta, src="hook"):
     # kind "v" = main wheel, "h" = side (thumb) wheel. delta is the raw signed wheel value.
     if delta == 0:
         return
     p = cfg["apps"].get(state["active"], cfg["default"])
     if not p["enabled"]:
         return
+    use_hid = p.get("thumb_hid") if kind == "h" else p.get("scroll_hid")
+    if bool(use_hid) != (src == "hid"):
+        return   # this profile uses the other source for this wheel
     if kind == "v":
         on, wf, dens = p["scroll_on"], p["scroll_wf"], p["scroll_density"]
     else:
@@ -337,6 +348,66 @@ def win_filter(msg, data):
             pass
         return False
     return True
+
+def handle_hid_report(r):
+    if len(r) >= 7 and r[0] == 0x11 and r[1] == THUMB_DEV and (r[3] >> 4) == 0:
+        if r[2] == THUMB_FEAT:
+            v = (r[4] << 8) | r[5]
+            if v >= 0x8000:
+                v -= 0x10000
+            if v:
+                wheel("h", v * 120.0 / HID_UNITS_PER_NOTCH, "hid")
+        elif r[2] == MAIN_FEAT:
+            v = (r[5] << 8) | r[6]
+            if v >= 0x8000:
+                v -= 0x10000
+            if v:
+                wheel("v", v * 120.0 / MAIN_UNITS_PER_NOTCH, "hid")
+
+def hid_worker():
+    # Read-only: listens to the mouse's own messages, sends nothing to it.
+    try:
+        import hid
+    except Exception:
+        return
+    while True:
+        hs = []
+        try:
+            for d in hid.enumerate(0x046D, 0):
+                if d.get("usage_page", 0) >= 0xFF00:
+                    try:
+                        h = hid.device()
+                        h.open_path(d["path"])
+                        h.set_nonblocking(1)
+                        hs.append(h)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        if not hs:
+            time.sleep(5)
+            continue
+        try:
+            while True:
+                got = False
+                for h in hs:
+                    r = h.read(64)
+                    while r:
+                        got = True
+                        handle_hid_report(r)
+                        r = h.read(64)
+                if not got:
+                    time.sleep(0.002)
+        except Exception:
+            pass
+        for h in hs:
+            try:
+                h.close()
+            except Exception:
+                pass
+        time.sleep(2)
+
+threading.Thread(target=hid_worker, daemon=True).start()
 
 mouse.Listener(on_click=on_click, win32_event_filter=win_filter).start()
 
@@ -378,6 +449,7 @@ background:#fff;border-radius:50%;transition:.2s}
 .sw input:checked+span:before{transform:translateX(20px)}
 hr{border:0;border-top:1px solid rgba(255,255,255,.1);margin:18px 0}
 .active{font-size:12px;opacity:.7;margin:-8px 0 12px}
+.hint{font-size:12px;opacity:.65;margin:-4px 0 8px}
 #saved{font-size:12px;opacity:0;transition:.3s;text-align:right;color:#66bb6a}
 </style></head><body><div class="card">
 <h1>HapticLite</h1>
@@ -410,12 +482,16 @@ hr{border:0;border-top:1px solid rgba(255,255,255,.1);margin:18px 0}
 <div class="row"><label>Scroll buzz</label><label class="sw"><input type="checkbox" id="scroll_on"><span></span></label></div>
 <div class="row"><label>Scroll waveform</label><select id="scroll_wf"></select><button onclick="t('scroll_wf')">Test</button></div>
 <div class="row"><label>Density</label><input type="range" id="scroll_density" min="0" max="4" step="1"><span class="val" id="scv"></span></div>
+<div class="row"><label>Mouse signal</label><label class="sw"><input type="checkbox" id="scroll_hid"><span></span></label></div>
+<div class="hint">Turn on in apps where the main wheel gives no buzz (for example taskmgr.exe). Needs the USB receiver.</div>
 <hr>
 
 <h3>Side scroll wheel (thumb)</h3>
 <div class="row"><label>Thumb buzz</label><label class="sw"><input type="checkbox" id="thumb_on"><span></span></label></div>
 <div class="row"><label>Thumb waveform</label><select id="thumb_wf"></select><button onclick="t('thumb_wf')">Test</button></div>
 <div class="row"><label>Density</label><input type="range" id="thumb_density" min="0" max="4" step="1"><span class="val" id="thv"></span></div>
+<div class="row"><label>Mouse signal</label><label class="sw"><input type="checkbox" id="thumb_hid"><span></span></label></div>
+<div class="hint">Turn on in apps where the side wheel gives no buzz (for example code.exe, excel.exe). Needs the USB receiver.</div>
 <hr>
 
 <h3>Pointer speed</h3>
@@ -436,7 +512,7 @@ hr{border:0;border-top:1px solid rgba(255,255,255,.1);margin:18px 0}
 const $=id=>document.getElementById(id);
 const WF=["left","right","middle","x1","x2","scroll_wf","thumb_wf","hold_wf","pulse_wf"];
 const SL=["delay","hold_ms","pulse_ms","strength","scroll_density","thumb_density","ptr_speed"];
-const CB=["enabled","pulse","scroll_on","thumb_on","hold_on","ptr_on"];
+const CB=["enabled","pulse","scroll_on","scroll_hid","thumb_on","thumb_hid","hold_on","ptr_on"];
 let S=null, cur="default";
 
 function opts(sel,list,val){
@@ -532,7 +608,7 @@ def api_save():
             p[k] = inc[k]
     for k, (lo, hi) in LIMITS.items():
         p[k] = max(lo, min(hi, int(p[k])))
-    for k in ("enabled", "pulse", "scroll_on", "thumb_on", "hold_on", "ptr_on"):
+    for k in ("enabled", "pulse", "scroll_on", "scroll_hid", "thumb_on", "thumb_hid", "hold_on", "ptr_on"):
         p[k] = bool(p[k])
     save_cfg()
     return jsonify(ok=True)
@@ -562,8 +638,8 @@ app.run(host="127.0.0.1", port=8767)
 Set-Content -Encoding utf8 "$dir\app.py" $app
 
 # ---- 4. libraries ----
-Write-Host "[4/7] Installing libraries (flask, requests, pynput, websocket-client)..."
-& $py -m pip install --quiet --disable-pip-version-check flask requests pynput websocket-client
+Write-Host "[4/7] Installing libraries (flask, requests, pynput, websocket-client, hidapi)..."
+& $py -m pip install --quiet --disable-pip-version-check flask requests pynput websocket-client hidapi
 if ($LASTEXITCODE -ne 0) { throw "pip install failed. Check your internet connection and run this script again." }
 
 # ---- 5. autostart (Task Scheduler, with Startup-shortcut fallback) ----
@@ -631,5 +707,5 @@ try {
 Write-Host ""
 Write-Host "Done. Still to do by hand:"
 Write-Host "  1. Logi Options+ > Buttons > Show actions ring > Configure action ring > Marketplace icon (top right) > search 'HapticWeb' by Jasper M-W > install, then restart Options+."
-Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file in the app folder)."
+Write-Host "  2. Optional: map an Options+ button or Actions Ring item to open http://localhost:8767 (or use the 'HapticLite Settings' file in the application folder)."
 Write-Host "Restart the app any time with 'restart.bat' in the application folder."
